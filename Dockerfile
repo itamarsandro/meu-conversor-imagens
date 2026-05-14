@@ -7,4 +7,4 @@ COPY . .
 # Criar pastas necessárias
 RUN mkdir -p uploads
 # Comando padrão (será substituído pelo docker-compose)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "443"]
