@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.staticfiles import StaticFiles
 from worker import processar_imagem
 from celery.result import AsyncResult
 import uuid
@@ -10,6 +11,9 @@ app = FastAPI(title="Fábrica de Imagens")
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
+
+# NECESSÁRIO: Permitir que as imagens processadas sejam baixadas pelo navegador
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.post("/upload")
 async def upload_imagem(
