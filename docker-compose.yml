@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  # O site/API que o usuário acessa
+  api-web:
+    build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    environment:
+      - REDIS_URL=redis://fila-redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - fila-redis
+
+  # O processador de imagens
+  processador-worker:
+    build: .
+    command: celery -A worker.app_celery worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://fila-redis:6379/0
+    depends_on:
+      - fila-redis
+
+  # A fila de espera
+  fila-redis:
+    image: redis:alpine
