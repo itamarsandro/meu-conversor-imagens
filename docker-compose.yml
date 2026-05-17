@@ -4,6 +4,7 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 80
     environment:
       - REDIS_URL=redis://fila-redis:6379/0
+    restart: always
     depends_on:
       - fila-redis
 
@@ -12,8 +13,10 @@ services:
     command: celery -A worker.app_celery worker --loglevel=info
     environment:
       - REDIS_URL=redis://fila-redis:6379/0
+    restart: always
     depends_on:
       - fila-redis
 
   fila-redis:
     image: redis:alpine
+    restart: always
