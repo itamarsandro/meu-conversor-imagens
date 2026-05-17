@@ -15,11 +15,43 @@ def processar_imagem(caminho_original, formato_saida, largura=None):
         # Carrega o arquivo gráfico através do volume compartilhado
         img = Image.open(caminho_original)
         
+        # === CORREÇÃO DE CORES PARA EXPORTAÇÃO (Evita erro "Mode P" ou Transparência) ===
+        formato_normalizado = formato_saida.lower()
+        
+        # Se o usuário pediu JPEG, precisamos remover qualquer transparência ou paleta (Mode P)
+        if formato_normalizado in ['jpeg', 'jpg']:
+            if img.mode in ('RGBA', 'P', 'LA'):
+                # Primeiro, converte a Paleta (P) para RGBA para podermos isolar a transparência
+                if img.mode == 'P':
+                    img = img.convert('RGBA')
+                
+                # Cria uma "tela" em branco puro do mesmo tamanho da imagem
+                fundo_branco = Image.new('RGB', img.size, (255, 255, 255))
+                
+                # Cola a imagem transparente por cima do fundo branco
+                if img.mode in ('RGBA', 'LA'):
+                    fundo_branco.paste(img, mask=img.split()[-1])
+                else:
+                    fundo_branco.paste(img)
+                
+                # A imagem oficial passa a ser essa composição sólida
+                img = fundo_branco
+            else:
+                # Se não for transparente, apenas garante que é RGB puro
+                img = img.convert('RGB')
+                
+        # Se não for JPEG, mas ainda for Modo P (ex: indo para WEBP ou PNG), converte para RGBA seguro
+        elif img.mode == 'P':
+            img = img.convert('RGBA')
+        # ==============================================================================
+
         # Executa o cálculo de proporção matemática e redimensionamento proporcional se necessário
         if largura:
-            porcentagem = (largura / float(img.size[0]))
+            # Transforma a largura que veio como string/int em float para o cálculo
+            largura_int = int(largura)
+            porcentagem = (largura_int / float(img.size[0]))
             altura = int((float(img.size[1]) * float(porcentagem)))
-            img = img.resize((largura, altura), Image.Resampling.LANCZOS)
+            img = img.resize((largura_int, altura), Image.Resampling.LANCZOS)
         
         # Altera o nome final adicionando o sufixo necessário para download seguro
         caminho_saida = caminho_original.rsplit(".", 1)[0] + f"_final.{formato_saida}"
