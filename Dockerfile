@@ -9,11 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Criar pastas necessárias internamente
+# Garante a existência da pasta de uploads no contexto interno
 RUN mkdir -p uploads
 
-# Expõe a porta 80 para a rede interna do Easypanel
+# Expõe a porta de comunicação interna para o proxy reverso do Easypanel
 EXPOSE 80
 
-# Comando padrão de inicialização
+# Comando para inicialização do Uvicorn em escuta de porta padrão HTTP
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
