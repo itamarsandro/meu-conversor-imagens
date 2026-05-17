@@ -12,8 +12,8 @@ COPY . .
 # Criar pastas necessárias
 RUN mkdir -p uploads
 
-# Expõe a porta 443 para o Easypanel
-EXPOSE 443
+# Expõe a porta 8000 para o Easypanel
+EXPOSE 8000
 
 # Comando padrão
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9999"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
