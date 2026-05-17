@@ -9,11 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Criar pastas necessárias
+# Criar pastas necessárias internamente
 RUN mkdir -p uploads
 
-# Expõe a porta 8000 para o Easypanel
+# Expõe a porta 80 para a rede interna do Easypanel
 EXPOSE 80
 
-# Comando padrão
+# Comando padrão de inicialização
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
