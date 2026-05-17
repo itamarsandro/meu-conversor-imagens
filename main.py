@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from worker import processar_imagem
 from celery.result import AsyncResult
@@ -13,8 +13,37 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# Permitir que as imagens processadas sejam baixadas pelo navegador
+# Permitir o mapeamento de arquivos estáticos da pasta uploads
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+def deletar_arquivo_servidor(caminho_arquivo: str):
+    """Função executada em segundo plano para deletar o arquivo após o download."""
+    try:
+        if os.path.exists(caminho_arquivo):
+            os.remove(caminho_arquivo)
+            print(f"Arquivo {caminho_arquivo} removido com sucesso do servidor.")
+    except Exception as e:
+        print(f"Erro ao remover arquivo em segundo plano: {str(e)}")
+
+@app.get("/download/{filename}")
+async def forcar_download_e_limpar(filename: str, background_tasks: BackgroundTasks):
+    """Endpoint que força o download do arquivo e agenda a sua destruição automática."""
+    # Proteção básica contra Path Traversal limpando caminhos relativos
+    nome_seguro = os.path.basename(filename)
+    caminho_completo = os.path.join(UPLOAD_DIR, nome_seguro)
+    
+    if not os.path.exists(caminho_completo):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado ou já deletado.")
+    
+    # Agenda a exclusão do arquivo para rodar IMEDIATAMENTE após a resposta ser entregue ao cliente
+    background_tasks.add_task(deletar_arquivo_servidor, caminho_completo)
+    
+    # Retorna o arquivo forçando o gatilho de download do navegador (Content-Disposition: attachment)
+    return FileResponse(
+        path=caminho_completo,
+        filename=nome_seguro,
+        media_type="application/octet-stream"
+    )
 
 @app.get("/", response_class=HTMLResponse)
 async def pagina_inicial():
@@ -59,10 +88,20 @@ async def pagina_inicial():
             </form>
             
             <div id="statusContainer" class="hidden mt-8 p-4 bg-slate-900 rounded-xl border border-slate-700 text-center space-y-4">
-                <div id="spinner" class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
+                <div id="iconContainer" class="flex justify-center items-center">
+                    <div id="spinner" class="animate-spin rounded-full h-10 w-10 border-4 border-emerald-500 border-t-transparent"></div>
+                    
+                    <div id="successCheck" class="hidden text-emerald-400 bg-emerald-500/10 p-2 rounded-full">
+                        <svg class="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                </div>
+                
                 <p id="statusTexto" class="text-sm font-medium text-emerald-400">Enviando arquivo...</p>
+                
                 <div id="downloadContainer" class="hidden">
-                    <a id="downloadLink" href="#" target="_blank" class="inline-block w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition duration-200 shadow-lg text-center">
+                    <a id="downloadLink" href="#" class="inline-block w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded-xl transition duration-200 shadow-lg text-center">
                         Baixar Imagem Convertida
                     </a>
                 </div>
@@ -70,6 +109,8 @@ async def pagina_inicial():
         </div>
 
         <script>
+            let checagemIntervalo = null;
+
             document.getElementById('uploadForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 
@@ -77,12 +118,14 @@ async def pagina_inicial():
                 const statusContainer = document.getElementById('statusContainer');
                 const statusTexto = document.getElementById('statusTexto');
                 const spinner = document.getElementById('spinner');
+                const successCheck = document.getElementById('successCheck');
                 const downloadContainer = document.getElementById('downloadContainer');
                 const downloadLink = document.getElementById('downloadLink');
                 
-                // Exibe o painel de status
+                // Reseta a interface gráfica para o estado inicial de processamento
                 statusContainer.classList.remove('hidden');
                 downloadContainer.classList.add('hidden');
+                successCheck.classList.add('hidden');
                 spinner.classList.remove('hidden');
                 statusTexto.innerText = "Enviando imagem para o servidor...";
                 
@@ -96,40 +139,62 @@ async def pagina_inicial():
                 }
                 
                 try {
-                    // 1. Envia a imagem para a API
+                    // 1. Envia a imagem original para a API FastAPI
                     const resposta = await fetch('/upload', { method: 'POST', body: formData });
                     const dados = await resposta.json();
                     
                     if (!dados.id_tarefa) {
-                        throw new Error("Falha ao iniciar tarefa");
+                        throw new Error("Falha ao iniciar processamento de fila.");
                     }
                     
                     const idTarefa = dados.id_tarefa;
-                    statusTexto.innerText = "Imagem na fila. Processando...";
+                    statusTexto.innerText = "Imagem recebida! Na fila de processamento...";
                     
-                    // 2. Inicia a checagem automática (Polling) em segundo plano
-                    const intervalo = setInterval(async () => {
+                    // 2. Inicia o Polling assíncrono para verificar o progresso do Celery Worker
+                    if (checagemIntervalo) clearInterval(checagemIntervalo);
+                    
+                    checagemIntervalo = setInterval(async () => {
                         const checarStatus = await fetch(`/status/${idTarefa}`);
                         const statusDados = await checarStatus.json();
                         
                         if (statusDados.status === "Concluído") {
-                            clearInterval(intervalo);
-                            spinner.classList.add('hidden');
+                            clearInterval(checagemIntervalo);
                             
                             if (statusDados.resultado.sucesso) {
-                                statusTexto.innerText = "Sucesso! Sua imagem está pronta.";
-                                downloadLink.href = statusDados.resultado.url_download;
+                                // Altera o Spinner de rotação pelo ícone estável de Checkmark de Conclusão
+                                spinner.classList.add('hidden');
+                                successCheck.classList.remove('hidden');
+                                statusTexto.innerText = "Sucesso! Sua imagem foi convertida.";
+                                
+                                // Extrai o nome puro do arquivo para redirecionar para a rota de download forçado
+                                const nomeArquivo = statusDados.resultado.url_download.split('/').pop();
+                                downloadLink.href = `/download/${nomeArquivo}`;
                                 downloadContainer.classList.remove('hidden');
                             } else {
-                                statusTexto.innerText = "Erro no processamento: " + statusDados.resultado.erro;
+                                spinner.classList.add('hidden');
+                                statusTexto.innerText = "Erro interno no processamento: " + statusDados.resultado.erro;
                             }
                         }
-                    }, 1500); // Checa a cada 1.5 segundos
+                    }, 1200); // Executa a checagem em ciclos rápidos de 1.2 segundos
                     
                 } catch (erro) {
                     spinner.classList.add('hidden');
-                    statusTexto.innerText = "Ocorreu um erro: " + erro.message;
+                    successCheck.classList.add('hidden');
+                    statusTexto.innerText = "Ocorreu um erro operacional: " + erro.message;
                 }
+            });
+
+            // Monitora o clique no botão para atualizar o estado e impedir loops de download
+            document.getElementById('downloadLink').addEventListener('click', () => {
+                const statusTexto = document.getElementById('statusTexto');
+                const downloadContainer = document.getElementById('downloadContainer');
+                const successCheck = document.getElementById('successCheck');
+                
+                setTimeout(() => {
+                    statusTexto.innerText = "Concluído! O arquivo foi baixado e apagado do servidor permanentemente.";
+                    downloadContainer.classList.add('hidden');
+                    successCheck.classList.add('hidden');
+                }, 800);
             });
         </script>
     </body>
@@ -143,16 +208,16 @@ async def upload_imagem(
     formato: str = Form("webp"), 
     largura: int = Form(None)
 ):
-    # Gera um nome único para o arquivo
+    # Gera uma hash única para evitar sobreposição de arquivos homônimos
     ext = arquivo.filename.split(".")[-1]
     id_unico = str(uuid.uuid4())
     caminho_entrada = os.path.join(UPLOAD_DIR, f"{id_unico}.{ext}")
     
-    # Salva o arquivo enviado no disco
+    # Salva o fluxo binário enviado no disco do volume compartilhado
     with open(caminho_entrada, "wb") as buffer:
         buffer.write(await arquivo.read())
     
-    # Envia para a fila do Celery (Worker)
+    # Envia a instrução de execução para a fila gerenciada pelo Redis/Celery
     tarefa = processar_imagem.delay(caminho_entrada, formato, largura)
     
     return {"id_tarefa": tarefa.id, "status": "Processando"}
