@@ -12,8 +12,16 @@ UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# NECESSÁRIO: Permitir que as imagens processadas sejam baixadas pelo navegador
+# Permitir que as imagens processadas sejam baixadas pelo navegador
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+@app.get("/")
+async def raiz():
+    return {
+        "status": "Online", 
+        "mensagem": "API Fábrica de Imagens funcionando!",
+        "documentacao": "Acesse /docs para ver os endpoints"
+    }
 
 @app.post("/upload")
 async def upload_imagem(
