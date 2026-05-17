@@ -13,7 +13,7 @@ COPY . .
 RUN mkdir -p uploads
 
 # Expõe a porta 8000 para o Easypanel
-EXPOSE 8000
+EXPOSE 80
 
 # Comando padrão
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
